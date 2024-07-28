@@ -1,7 +1,12 @@
-#include <opencv2/opencv.hpp>
-#include <iostream>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
-using namespace cv;
+#include <iostream>
+#include <cmath>
+#include <chrono>
+
 using namespace std;
 
 // Sobel filter kernels
@@ -18,40 +23,49 @@ int sobelY[3][3] = {
 };
 
 // Apply Sobel filter in serial
-void sobelSerial(const Mat& src, Mat& dst) {
-    dst = Mat::zeros(src.size(), CV_8UC1);
-
-    for (int y = 1; y < src.rows - 1; y++) {
-        for (int x = 1; x < src.cols - 1; x++) {
+void sobelSerial(unsigned char* src, unsigned char* dst, int width, int height, int channels) {
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
             int gx = 0, gy = 0;
             for (int i = -1; i <= 1; i++) {
                 for (int j = -1; j <= 1; j++) {
-                    gx += sobelX[i + 1][j + 1] * src.at<uchar>(y + i, x + j);
-                    gy += sobelY[i + 1][j + 1] * src.at<uchar>(y + i, x + j);
+                    int pixel = src[(y + i) * width + (x + j)];
+                    gx += sobelX[i + 1][j + 1] * pixel;
+                    gy += sobelY[i + 1][j + 1] * pixel;
                 }
             }
-            dst.at<uchar>(y, x) = sqrt(gx * gx + gy * gy);
+            int magnitude = static_cast<int>(sqrt(gx * gx + gy * gy));
+            magnitude = min(max(magnitude, 0), 255); // Clamp to [0, 255]
+            dst[y * width + x] = static_cast<unsigned char>(magnitude);
         }
     }
 }
 
 int main() {
-    Mat src = imread("input.jpg", IMREAD_GRAYSCALE);
-    if (src.empty()) {
-        cout << "Error loading image" << endl;
+    int width, height, channels;
+    // Load the image (grayscale)
+    unsigned char* img = stbi_load("input.jpg", &width, &height, &channels, 1);
+    if (!img) {
+        cout << "Error loading image: " << stbi_failure_reason() << endl;
         return -1;
     }
 
-    Mat dst;
+    // Allocate memory for the output image
+    unsigned char* edge_img = new unsigned char[width * height];
 
-    // Serial execution
-    double startSerial = (double)getTickCount();
-    sobelSerial(src, dst);
-    double endSerial = (double)getTickCount();
-    double serialTime = (endSerial - startSerial) / getTickFrequency();
-    cout << "Serial execution time: " << serialTime << " seconds" << endl;
+    // Measure time for serial Sobel filter
+    auto start = chrono::high_resolution_clock::now();
+    sobelSerial(img, edge_img, width, height, channels);
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> elapsed = end - start;
+    cout << "Serial execution time: " << elapsed.count() << " seconds" << endl;
 
-    imwrite("output_serial.jpg", dst);
+    // Save the edge-detected image
+    stbi_write_jpg("output_serial.jpg", width, height, 1, edge_img, 100);
+
+    // Free the allocated memory
+    stbi_image_free(img);
+    delete[] edge_img;
 
     return 0;
 }
