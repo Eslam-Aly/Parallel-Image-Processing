@@ -1,11 +1,14 @@
-#include <opencv2/opencv.hpp>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 #include <iostream>
+#include <cmath>
 #include <omp.h>
 
-using namespace cv;
 using namespace std;
 
-// Sobel filter kernels
 int sobelX[3][3] = {
     {-1, 0, 1},
     {-2, 0, 2},
@@ -18,38 +21,44 @@ int sobelY[3][3] = {
     {1, 2, 1}
 };
 
-// Apply Sobel filter in parallel using OpenMP
-void sobelParallel(const Mat& src, Mat& dst) {
-    dst = Mat::zeros(src.size(), CV_8UC1);
-
-    #pragma omp parallel for collapse(2)
-    for (int y = 1; y < src.rows - 1; y++) {
-        for (int x = 1; x < src.cols - 1; x++) {
+void sobelParallel(unsigned char* src, unsigned char* dst, int width, int height, int channels) {
+#pragma omp parallel for collapse(2)
+    for (int y = 1; y < height - 1; y++) {
+        for (int x = 1; x < width - 1; x++) {
             int gx = 0, gy = 0;
             for (int i = -1; i <= 1; i++) {
                 for (int j = -1; j <= 1; j++) {
-                    gx += sobelX[i + 1][j + 1] * src.at<uchar>(y + i, x + j);
-                    gy += sobelY[i + 1][j + 1] * src.at<uchar>(y + i, x + j);
+                    int pixel = src[(y + i) * width + (x + j)];
+                    gx += sobelX[i + 1][j + 1] * pixel;
+                    gy += sobelY[i + 1][j + 1] * pixel;
                 }
             }
-            dst.at<uchar>(y, x) = sqrt(gx * gx + gy * gy);
+            int magnitude = static_cast<int>(sqrt(gx * gx + gy * gy));
+            magnitude = min(max(magnitude, 0), 255); // Clamp to [0, 255]
+            dst[y * width + x] = static_cast<unsigned char>(magnitude);
         }
     }
 }
 
 int main() {
-    Mat src = imread("input.jpg", IMREAD_GRAYSCALE);
-    if (src.empty()) {
+    int width, height, channels;
+    unsigned char* img = stbi_load("input.jpg", &width, &height, &channels, 1);
+    if (!img) {
         cout << "Error loading image" << endl;
         return -1;
     }
 
-    Mat dst;
+    unsigned char* edge_img = new unsigned char[width * height];
+
     double start = omp_get_wtime();
-    sobelParallel(src, dst);
+    sobelParallel(img, edge_img, width, height, channels);
     double end = omp_get_wtime();
     cout << "Parallel execution time: " << (end - start) << " seconds" << endl;
 
-    imwrite("output_parallel.jpg", dst);
+    stbi_write_jpg("output_parallel.jpg", width, height, 1, edge_img, 100);
+
+    stbi_image_free(img);
+    delete[] edge_img;
+
     return 0;
 }
